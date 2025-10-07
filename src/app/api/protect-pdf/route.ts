@@ -1,10 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, readFile, unlink } from 'fs/promises'
-import { join } from 'path'
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
+import { NextRequest } from 'next/server'
+import { encryptPDF, validatePDFBuffer, validatePassword } from '@/lib/pdf-encryption'
+import { 
+  createErrorResponse, 
+  createPDFResponse, 
+  validateFormData, 
+  validateFile, 
+  ERROR_MESSAGES, 
+  HTTP_STATUS,
+  logAPIError 
+} from '@/lib/api-utils'
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,99 +17,61 @@ export async function POST(request: NextRequest) {
     const password = formData.get('password') as string
     const ownerPassword = formData.get('ownerPassword') as string
 
-    if (!file || !password) {
-      return NextResponse.json(
-        { error: 'File and password are required' },
-        { status: 400 }
+    // Validate required fields
+    const validation = validateFormData(formData, ['file', 'password'])
+    if (!validation.isValid) {
+      return createErrorResponse(
+        `${ERROR_MESSAGES.MISSING_PARAMETERS}: ${validation.missingFields.join(', ')}`,
+        HTTP_STATUS.BAD_REQUEST
       )
     }
 
-    // Create temporary directory for processing
-    const tempDir = '/tmp/pdf-protect'
-    const timestamp = Date.now()
-    const inputPath = join(tempDir, `input_${timestamp}.pdf`)
-    const outputPath = join(tempDir, `output_${timestamp}.pdf`)
+    // Validate file
+    const fileValidation = validateFile(file)
+    if (!fileValidation.isValid) {
+      return createErrorResponse(fileValidation.message!, HTTP_STATUS.BAD_REQUEST)
+    }
 
-    try {
-      // Ensure temp directory exists
-      await execAsync(`mkdir -p ${tempDir}`)
+    // Validate password
+    const passwordValidation = validatePassword(password)
+    if (!passwordValidation.isValid) {
+      return createErrorResponse(passwordValidation.message!, HTTP_STATUS.BAD_REQUEST)
+    }
 
-      // Save uploaded file
-      const bytes = await file.arrayBuffer()
-      const buffer = Buffer.from(bytes)
-      await writeFile(inputPath, buffer)
+    // Convert file to buffer
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
 
-      // Build qpdf command
-      let command = `qpdf --encrypt "${password}"`
-      
-      if (ownerPassword) {
-        command += ` "${ownerPassword}"`
-      } else {
-        // Use user password as owner password if not provided
-        command += ` "${password}"`
-      }
-      
-      command += ` 256 -- "${inputPath}" "${outputPath}"`
+    // Validate PDF buffer
+    if (!validatePDFBuffer(buffer)) {
+      return createErrorResponse(ERROR_MESSAGES.INVALID_FILE, HTTP_STATUS.BAD_REQUEST)
+    }
 
-      // Execute qpdf command
-      await execAsync(command)
+    // Encrypt PDF
+    const result = await encryptPDF(buffer, {
+      userPassword: password,
+      ownerPassword: ownerPassword || undefined,
+      encryptionLevel: 256
+    })
 
-      // Read the protected file
-      const protectedFileBuffer = await readFile(outputPath)
-
-      // Clean up temporary files
-      await unlink(inputPath)
-      await unlink(outputPath)
-
-      // Return the protected PDF
-      return new NextResponse(protectedFileBuffer, {
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="protected_${file.name}"`,
-        },
+    if (!result.success) {
+      logAPIError('PDF Protection', new Error(result.error), {
+        filename: file.name,
+        fileSize: file.size
       })
-    } catch (error) {
-      // Clean up on error
-      try {
-        await unlink(inputPath)
-        await unlink(outputPath)
-      } catch (cleanupError) {
-        // Ignore cleanup errors
-      }
-
-      console.error('PDF protection error:', error)
       
-      if (error instanceof Error) {
-        if (error.message.includes('qpdf: command not found')) {
-          return NextResponse.json(
-            { error: 'qpdf is not installed on the server' },
-            { status: 500 }
-          )
-        }
-        if (error.message.includes('wrong password')) {
-          return NextResponse.json(
-            { error: 'Invalid password provided' },
-            { status: 400 }
-          )
-        }
-        if (error.message.includes('invalid PDF')) {
-          return NextResponse.json(
-            { error: 'Invalid or corrupted PDF file' },
-            { status: 400 }
-          )
-        }
-      }
-
-      return NextResponse.json(
-        { error: 'Failed to protect PDF file' },
-        { status: 500 }
-      )
+      const status = result.error?.includes('qpdf is not installed') 
+        ? HTTP_STATUS.SERVICE_UNAVAILABLE 
+        : HTTP_STATUS.INTERNAL_SERVER_ERROR
+      
+      return createErrorResponse(result.error!, status)
     }
+
+    // Return protected PDF
+    return createPDFResponse(result.data!, file.name, true)
+    
   } catch (error) {
-    console.error('API error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
+    logAPIError('PDF Protection API', error)
+    return createErrorResponse(ERROR_MESSAGES.INTERNAL_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR)
   }
 }
