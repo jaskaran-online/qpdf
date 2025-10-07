@@ -1,77 +1,94 @@
-import { NextRequest } from 'next/server'
-import { encryptPDF, validatePDFBuffer, validatePassword } from '@/lib/pdf-encryption'
-import { 
-  createErrorResponse, 
-  createPDFResponse, 
-  validateFormData, 
-  validateFile, 
-  ERROR_MESSAGES, 
+import { NextRequest } from "next/server";
+import {
+  encryptPDF,
+  validatePDFBuffer,
+  validatePassword,
+} from "@/lib/pdf-encryption";
+import {
+  createErrorResponse,
+  createPDFResponse,
+  validateFormData,
+  validateFile,
+  ERROR_MESSAGES,
   HTTP_STATUS,
-  logAPIError 
-} from '@/lib/api-utils'
+  logAPIError,
+} from "@/lib/api-utils";
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData()
-    const file = formData.get('file') as File
-    const password = formData.get('password') as string
-    const ownerPassword = formData.get('ownerPassword') as string
+    const formData = await request.formData();
+    const file = formData.get("file") as File;
+    const password = formData.get("password") as string;
+    const ownerPassword = formData.get("ownerPassword") as string;
 
     // Validate required fields
-    const validation = validateFormData(formData, ['file', 'password'])
+    const validation = validateFormData(formData, ["file", "password"]);
     if (!validation.isValid) {
       return createErrorResponse(
-        `${ERROR_MESSAGES.MISSING_PARAMETERS}: ${validation.missingFields.join(', ')}`,
+        `${ERROR_MESSAGES.MISSING_PARAMETERS}: ${validation.missingFields.join(
+          ", "
+        )}`,
         HTTP_STATUS.BAD_REQUEST
-      )
+      );
     }
 
     // Validate file
-    const fileValidation = validateFile(file)
+    const fileValidation = validateFile(file);
     if (!fileValidation.isValid) {
-      return createErrorResponse(fileValidation.message!, HTTP_STATUS.BAD_REQUEST)
+      return createErrorResponse(
+        fileValidation.message!,
+        HTTP_STATUS.BAD_REQUEST
+      );
     }
 
     // Validate password
-    const passwordValidation = validatePassword(password)
+    const passwordValidation = validatePassword(password);
     if (!passwordValidation.isValid) {
-      return createErrorResponse(passwordValidation.message!, HTTP_STATUS.BAD_REQUEST)
+      return createErrorResponse(
+        passwordValidation.message!,
+        HTTP_STATUS.BAD_REQUEST
+      );
     }
 
     // Convert file to buffer
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
 
     // Validate PDF buffer
     if (!validatePDFBuffer(buffer)) {
-      return createErrorResponse(ERROR_MESSAGES.INVALID_FILE, HTTP_STATUS.BAD_REQUEST)
+      return createErrorResponse(
+        ERROR_MESSAGES.INVALID_FILE,
+        HTTP_STATUS.BAD_REQUEST
+      );
     }
 
     // Encrypt PDF
     const result = await encryptPDF(buffer, {
       userPassword: password,
       ownerPassword: ownerPassword || undefined,
-      encryptionLevel: 256
-    })
+      encryptionLevel: 256,
+    });
 
     if (!result.success) {
-      logAPIError('PDF Protection', new Error(result.error), {
+      logAPIError("PDF Protection", new Error(result.error), {
         filename: file.name,
-        fileSize: file.size
-      })
-      
-      const status = result.error?.includes('qpdf is not installed') 
-        ? HTTP_STATUS.SERVICE_UNAVAILABLE 
-        : HTTP_STATUS.INTERNAL_SERVER_ERROR
-      
-      return createErrorResponse(result.error!, status)
+        fileSize: file.size,
+      });
+
+      const status = result.error?.includes("qpdf is not installed")
+        ? HTTP_STATUS.SERVICE_UNAVAILABLE
+        : HTTP_STATUS.INTERNAL_SERVER_ERROR;
+
+      return createErrorResponse(result.error!, status);
     }
 
     // Return protected PDF
-    return createPDFResponse(result.data!, file.name, true)
-    
+    return createPDFResponse(result.data!, file.name, true);
   } catch (error) {
-    logAPIError('PDF Protection API', error)
-    return createErrorResponse(ERROR_MESSAGES.INTERNAL_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR)
+    logAPIError("PDF Protection API", error);
+    return createErrorResponse(
+      ERROR_MESSAGES.INTERNAL_ERROR,
+      HTTP_STATUS.INTERNAL_SERVER_ERROR
+    );
   }
 }
