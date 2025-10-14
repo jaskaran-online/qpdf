@@ -1,7 +1,8 @@
-import { writeFile, readFile, unlink } from 'fs/promises'
+import { writeFile, readFile, unlink, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
+import { tmpdir } from 'os'
 
 const execAsync = promisify(exec)
 
@@ -15,6 +16,13 @@ export interface EncryptionResult {
   success: boolean
   data?: Buffer
   error?: string
+  details?: {
+    originalError: string
+    command?: string
+    exitCode?: number
+    stderr?: string
+    stdout?: string
+  }
 }
 
 export interface DecryptionOptions {
@@ -25,6 +33,13 @@ export interface DecryptionResult {
   success: boolean
   data?: Buffer
   error?: string
+  details?: {
+    originalError: string
+    command?: string
+    exitCode?: number
+    stderr?: string
+    stdout?: string
+  }
 }
 
 /**
@@ -37,30 +52,30 @@ export async function encryptPDF(
   inputBuffer: Buffer,
   options: EncryptionOptions
 ): Promise<EncryptionResult> {
-  const tempDir = '/tmp/pdf-protect'
+  const tempDir = join(tmpdir(), 'pdf-protect')
   const timestamp = Date.now()
   const inputPath = join(tempDir, `input_${timestamp}.pdf`)
   const outputPath = join(tempDir, `output_${timestamp}.pdf`)
 
+  // Build qpdf command
+  let command = `qpdf --encrypt "${options.userPassword}"`
+
+  if (options.ownerPassword) {
+    command += ` "${options.ownerPassword}"`
+  } else {
+    // Use user password as owner password if not provided
+    command += ` "${options.userPassword}"`
+  }
+
+  const encryptionLevel = options.encryptionLevel || 256
+  command += ` ${encryptionLevel} -- "${inputPath}" "${outputPath}"`
+
   try {
     // Ensure temp directory exists
-    await execAsync(`mkdir -p ${tempDir}`)
+    await mkdir(tempDir, { recursive: true })
 
     // Save input file
     await writeFile(inputPath, inputBuffer)
-
-    // Build qpdf command
-    let command = `qpdf --encrypt "${options.userPassword}"`
-    
-    if (options.ownerPassword) {
-      command += ` "${options.ownerPassword}"`
-    } else {
-      // Use user password as owner password if not provided
-      command += ` "${options.userPassword}"`
-    }
-    
-    const encryptionLevel = options.encryptionLevel || 256
-    command += ` ${encryptionLevel} -- "${inputPath}" "${outputPath}"`
 
     // Execute qpdf command
     await execAsync(command)
@@ -85,9 +100,19 @@ export async function encryptPDF(
       // Ignore cleanup errors
     }
 
+    const originalError = error instanceof Error ? error.message : String(error)
+    const userFriendlyError = handleEncryptionError(error)
+
     return {
       success: false,
-      error: handleEncryptionError(error)
+      error: userFriendlyError,
+      details: {
+        originalError,
+        command,
+        exitCode: error instanceof Error && 'code' in error ? (error as any).code : undefined,
+        stderr: error instanceof Error && 'stderr' in error ? (error as any).stderr : undefined,
+        stdout: error instanceof Error && 'stdout' in error ? (error as any).stdout : undefined,
+      }
     }
   }
 }
@@ -102,20 +127,20 @@ export async function decryptPDF(
   inputBuffer: Buffer,
   options: DecryptionOptions
 ): Promise<DecryptionResult> {
-  const tempDir = '/tmp/pdf-unprotect'
+  const tempDir = join(tmpdir(), 'pdf-unprotect')
   const timestamp = Date.now()
   const inputPath = join(tempDir, `input_${timestamp}.pdf`)
   const outputPath = join(tempDir, `output_${timestamp}.pdf`)
 
+  // Build qpdf command to decrypt PDF
+  const command = `qpdf --password="${options.password}" --decrypt "${inputPath}" "${outputPath}"`
+
   try {
     // Ensure temp directory exists
-    await execAsync(`mkdir -p ${tempDir}`)
+    await mkdir(tempDir, { recursive: true })
 
     // Save input file
     await writeFile(inputPath, inputBuffer)
-
-    // Build qpdf command to decrypt PDF
-    const command = `qpdf --password="${options.password}" --decrypt "${inputPath}" "${outputPath}"`
 
     // Execute qpdf command
     await execAsync(command)
@@ -140,9 +165,19 @@ export async function decryptPDF(
       // Ignore cleanup errors
     }
 
+    const originalError = error instanceof Error ? error.message : String(error)
+    const userFriendlyError = handleDecryptionError(error)
+
     return {
       success: false,
-      error: handleDecryptionError(error)
+      error: userFriendlyError,
+      details: {
+        originalError,
+        command,
+        exitCode: error instanceof Error && 'code' in error ? (error as any).code : undefined,
+        stderr: error instanceof Error && 'stderr' in error ? (error as any).stderr : undefined,
+        stdout: error instanceof Error && 'stdout' in error ? (error as any).stdout : undefined,
+      }
     }
   }
 }

@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
         fileSize: file.size,
         userPasswordProvided: !!password,
         ownerPasswordProvided: !!ownerPassword,
+        qpdfError: result.details,
       });
     }
 

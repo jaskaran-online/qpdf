@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
         filename: file.name,
         fileSize: file.size,
         passwordProvided: !!password,
+        qpdfError: result.details,
       })
     }
 
