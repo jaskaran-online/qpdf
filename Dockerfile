@@ -21,6 +21,9 @@ RUN pnpm install --frozen-lockfile
 # Copy source code
 COPY . .
 
+# Generate Prisma client
+RUN pnpm db:generate
+
 # Create temp directories for PDF processing
 RUN mkdir -p /tmp/pdf-protect /tmp/pdf-unprotect
 
@@ -29,6 +32,7 @@ RUN chmod 755 /tmp/pdf-protect /tmp/pdf-unprotect
 
 # Build stage for production
 FROM base AS build
+RUN pnpm db:generate
 RUN pnpm build
 
 # Production stage
@@ -45,6 +49,7 @@ WORKDIR /app
 # Copy package files and node_modules from base
 COPY --from=base /app/package*.json /app/pnpm-lock.yaml ./
 COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/prisma ./prisma
 
 # Copy built application
 COPY --from=build /app/.next ./.next
