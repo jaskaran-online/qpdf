@@ -56,21 +56,35 @@ export async function POST(request: NextRequest) {
         filename: file.name,
         fileSize: file.size
       })
-      
-      const status = result.error?.includes('qpdf is not installed') 
-        ? HTTP_STATUS.SERVICE_UNAVAILABLE 
-        : result.error?.includes('Invalid password') 
+
+      const status = result.error?.includes('qpdf is not installed')
+        ? HTTP_STATUS.SERVICE_UNAVAILABLE
+        : result.error?.includes('Invalid password')
         ? HTTP_STATUS.BAD_REQUEST
         : HTTP_STATUS.INTERNAL_SERVER_ERROR
-      
-      return createErrorResponse(result.error!, status)
+
+      return createErrorResponse(result.error!, status, {
+        operation: "PDF Unprotection",
+        filename: file.name,
+        fileSize: file.size,
+        passwordProvided: !!password,
+      })
     }
 
     // Return unprotected PDF
     return createPDFResponse(result.data!, file.name, false)
     
   } catch (error) {
+    const errorDetails = error instanceof Error ? {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    } : { error: String(error) };
+
     logAPIError('PDF Unprotection API', error)
-    return createErrorResponse(ERROR_MESSAGES.INTERNAL_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR)
+    return createErrorResponse(ERROR_MESSAGES.INTERNAL_ERROR, HTTP_STATUS.INTERNAL_SERVER_ERROR, {
+      operation: "PDF Unprotection API",
+      ...errorDetails,
+    })
   }
 }

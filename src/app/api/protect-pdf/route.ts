@@ -79,16 +79,32 @@ export async function POST(request: NextRequest) {
         ? HTTP_STATUS.SERVICE_UNAVAILABLE
         : HTTP_STATUS.INTERNAL_SERVER_ERROR;
 
-      return createErrorResponse(result.error!, status);
+      return createErrorResponse(result.error!, status, {
+        operation: "PDF Protection",
+        filename: file.name,
+        fileSize: file.size,
+        userPasswordProvided: !!password,
+        ownerPasswordProvided: !!ownerPassword,
+      });
     }
 
     // Return protected PDF
     return createPDFResponse(result.data!, file.name, true);
   } catch (error) {
+    const errorDetails = error instanceof Error ? {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    } : { error: String(error) };
+
     logAPIError("PDF Protection API", error);
     return createErrorResponse(
       ERROR_MESSAGES.INTERNAL_ERROR,
-      HTTP_STATUS.INTERNAL_SERVER_ERROR
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      {
+        operation: "PDF Protection API",
+        ...errorDetails,
+      }
     );
   }
 }

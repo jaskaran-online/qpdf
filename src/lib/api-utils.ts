@@ -9,10 +9,36 @@ export interface APIError {
  * Creates a standardized error response
  * @param message - Error message
  * @param status - HTTP status code
+ * @param details - Additional error details for debugging
  * @returns NextResponse with error
  */
-export function createErrorResponse(message: string, status: number = 500): NextResponse {
-  return NextResponse.json({ error: message }, { status })
+export function createErrorResponse(
+  message: string,
+  status: number = 500,
+  details?: Record<string, any>
+): NextResponse {
+  const errorResponse: any = {
+    error: message,
+    status,
+    timestamp: new Date().toISOString(),
+  }
+
+  if (details && Object.keys(details).length > 0) {
+    errorResponse.details = details
+  }
+
+  // In development, include stack trace if available
+  if (process.env.NODE_ENV === 'development' && details?.stack) {
+    errorResponse.stack = details.stack
+  }
+
+  return NextResponse.json(errorResponse, {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Error': 'true',
+    }
+  })
 }
 
 /**

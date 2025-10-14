@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   qpdf-app:
-    build: .
+    build:
+      context: .
+      target: development
     ports:
       - "3000:3000"
     environment:
