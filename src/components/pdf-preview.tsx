@@ -62,7 +62,7 @@ export function PDFPreview({
           <>
             {/* PDF Viewer */}
             <div className="border rounded-lg overflow-hidden bg-gray-100 min-h-[600px]">
-              <Worker workerUrl="https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.js">
+              <Worker workerUrl="/pdfjs/pdf.worker.min.js">
                 <Viewer
                   fileUrl={pdfData}
                   plugins={[defaultLayoutPluginInstance]}
