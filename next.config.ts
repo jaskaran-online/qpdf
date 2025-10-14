@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
 
     ignoreDuringBuilds: true,
   },
+  transpilePackages: ['@react-pdf-viewer/core', '@react-pdf-viewer/default-layout'],
 };
 
 export default nextConfig;

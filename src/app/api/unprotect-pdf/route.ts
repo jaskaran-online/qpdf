@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { decryptPDF, validatePDFBuffer, validatePassword } from '@/lib/pdf-encryption'
 import { 
   createErrorResponse, 
@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get('file') as File
     const password = formData.get('password') as string
+    const preview = formData.get('preview') === 'true'
 
     // Validate required fields
     const validation = validateFormData(formData, ['file', 'password'])
@@ -73,7 +74,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Return unprotected PDF
-    return createPDFResponse(result.data!, file.name, false)
+    if (preview) {
+      // Return preview information
+      return NextResponse.json({
+        success: true,
+        preview: true,
+        filename: file.name,
+        originalSize: file.size,
+        decryptedSize: result.data!.length,
+        base64Data: result.data!.toString('base64'),
+        timestamp: new Date().toISOString()
+      })
+    } else {
+      // Return PDF file for download
+      return createPDFResponse(result.data!, file.name, false)
+    }
     
   } catch (error) {
     const errorDetails = error instanceof Error ? {

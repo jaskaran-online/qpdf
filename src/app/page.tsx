@@ -11,6 +11,12 @@ import { Progress } from '@/components/ui/progress'
 import { Upload, Download, Lock, Unlock, FileText, Shield, ShieldOff } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import { Sidebar } from '@/components/sidebar'
+import dynamic from 'next/dynamic'
+
+const PDFPreview = dynamic(() => import('@/components/pdf-preview').then(mod => ({ default: mod.PDFPreview })), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center p-8">Loading PDF preview...</div>
+})
 
 interface ProcessingState {
   isProcessing: boolean
@@ -19,6 +25,12 @@ interface ProcessingState {
   error: string | null
   downloadUrl: string | null
   fileName: string | null
+  previewData: {
+    filename: string
+    originalSize: number
+    decryptedSize: number
+    base64Data: string
+  } | null
 }
 
 export default function PDFProtector() {
@@ -32,14 +44,15 @@ export default function PDFProtector() {
     message: '',
     error: null,
     downloadUrl: null,
-    fileName: null
+    fileName: null,
+    previewData: null
   })
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0]
     if (file && file.type === 'application/pdf') {
       setSelectedFile(file)
-      setProcessing(prev => ({ ...prev, error: null, downloadUrl: null, fileName: null }))
+      setProcessing(prev => ({ ...prev, error: null, downloadUrl: null, fileName: null, previewData: null }))
     } else {
       setProcessing(prev => ({ ...prev, error: 'Please select a valid PDF file' }))
     }
@@ -63,7 +76,8 @@ export default function PDFProtector() {
       message: 'Preparing to protect PDF...',
       error: null,
       downloadUrl: null,
-      fileName: null
+      fileName: null,
+      previewData: null
     })
 
     try {
@@ -113,10 +127,15 @@ export default function PDFProtector() {
     }
   }
 
-  const unprotectPDF = async () => {
+  const unprotectPDF = async (downloadAfterPreview = false) => {
     if (!selectedFile || !currentPassword) {
       setProcessing(prev => ({ ...prev, error: 'Please select a file and enter the current password' }))
       return
+    }
+
+    // If we already have preview data and want to download, skip to download
+    if (downloadAfterPreview && processing.previewData) {
+      return downloadPreviewPDF()
     }
 
     setProcessing({
@@ -125,13 +144,15 @@ export default function PDFProtector() {
       message: 'Preparing to unprotect PDF...',
       error: null,
       downloadUrl: null,
-      fileName: null
+      fileName: null,
+      previewData: null
     })
 
     try {
       const formData = new FormData()
       formData.append('file', selectedFile)
       formData.append('password', currentPassword)
+      formData.append('preview', 'true')
 
       setProcessing(prev => ({ ...prev, progress: 25, message: 'Uploading file...' }))
 
@@ -147,18 +168,21 @@ export default function PDFProtector() {
         throw new Error(errorData.error || 'Failed to unprotect PDF')
       }
 
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const originalName = selectedFile.name.replace('.pdf', '')
-      const unprotectedName = `${originalName}_unprotected.pdf`
+      const previewData = await response.json()
 
       setProcessing({
         isProcessing: false,
         progress: 100,
-        message: 'PDF unprotected successfully!',
+        message: 'PDF preview ready!',
         error: null,
-        downloadUrl: url,
-        fileName: unprotectedName
+        downloadUrl: null,
+        fileName: null,
+        previewData: {
+          filename: previewData.filename,
+          originalSize: previewData.originalSize,
+          decryptedSize: previewData.decryptedSize,
+          base64Data: previewData.base64Data
+        }
       })
     } catch (error) {
       setProcessing({
@@ -167,8 +191,59 @@ export default function PDFProtector() {
         message: '',
         error: error instanceof Error ? error.message : 'Failed to unprotect PDF',
         downloadUrl: null,
-        fileName: null
+        fileName: null,
+        previewData: null
       })
+    }
+  }
+
+  const downloadPreviewPDF = async () => {
+    if (!processing.previewData) return
+
+    setProcessing(prev => ({
+      ...prev,
+      isProcessing: true,
+      progress: 50,
+      message: 'Preparing download...'
+    }))
+
+    try {
+      const formData = new FormData()
+      formData.append('file', selectedFile!)
+      formData.append('password', currentPassword)
+
+      const response = await fetch('/api/unprotect-pdf', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to download PDF')
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const originalName = processing.previewData.filename.replace('.pdf', '')
+      const unprotectedName = `${originalName}_unprotected.pdf`
+
+      setProcessing(prev => ({
+        ...prev,
+        isProcessing: false,
+        progress: 100,
+        message: 'Download ready!',
+        downloadUrl: url,
+        fileName: unprotectedName
+      }))
+    } catch (error) {
+      setProcessing(prev => ({
+        ...prev,
+        isProcessing: false,
+        progress: 0,
+        error: error instanceof Error ? error.message : 'Failed to download PDF',
+        downloadUrl: null,
+        fileName: null
+      }))
     }
   }
 
@@ -194,7 +269,8 @@ export default function PDFProtector() {
       message: '',
       error: null,
       downloadUrl: null,
-      fileName: null
+      fileName: null,
+      previewData: null
     })
   }
 
@@ -388,7 +464,17 @@ export default function PDFProtector() {
           </Alert>
         )}
 
-        {processing.downloadUrl && (
+        {processing.previewData && (
+          <PDFPreview
+            base64Data={processing.previewData.base64Data}
+            filename={processing.previewData.filename}
+            originalSize={processing.previewData.originalSize}
+            decryptedSize={processing.previewData.decryptedSize}
+            onDownload={() => unprotectPDF(true)}
+          />
+        )}
+
+        {processing.downloadUrl && !processing.previewData && (
           <Card className="mt-6 border-green-200 bg-green-50">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
